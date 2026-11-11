@@ -2,52 +2,49 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	xxl "github.com/it512/xxl-job-exec"
+	"net"
 	"net/http"
-
-	"github.com/go-chi/chi/v5"
-	"github.com/it512/xxl-job-exec"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
+// main 在可返回错误的启动边界外报告失败。
 func main() {
-	exec := xxl.NewExecutor(
-		xxl.ServerAddr("http://127.0.0.1:8080/xxl-job-admin"),
-		xxl.AccessToken("default_token"),
-		xxl.RegistryKey("test"),
-		xxl.ExecutorURL("http://127.0.0.1:10010/xxl-job"),
-	)
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
 
-	exec.RegTask("test", func(ctx context.Context, task *xxl.Task) error {
-		fmt.Println("OK")
-		return nil
+// run 先绑定监听再注册，关闭时等待任务和结果回调。
+func run() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	executor := xxl.NewExecutor(xxl.ServerAddr("http://127.0.0.1:8080/xxl-job-admin"), xxl.AccessToken("default_token"), xxl.RegistryKey("go-example"), xxl.ExecutorURL("http://127.0.0.1:10010/xxl-job"), xxl.SetContext(ctx))
+	executor.RegTask("smoke", func(ctx context.Context, task *xxl.Task) error {
+		task.Logger().InfoContext(ctx, "example task executed")
+		return ctx.Err()
 	})
-
-	exec.RegTask("ok", func(ctx context.Context, task *xxl.Task) error {
-		fmt.Println("OK")
-		return nil
-	})
-
-	exec.RegTask("error", func(ctx context.Context, task *xxl.Task) error {
-		return errors.New("this is a error")
-	})
-
-	exec.RegTask("panic", func(ctx context.Context, task *xxl.Task) error {
-		panic("this is a panic")
-	})
-
-	exec.RegTask("timeout", func(ctx context.Context, task *xxl.Task) error {
-		<-ctx.Done()
-		fmt.Println("timeout or killed!")
-		return nil
-	})
-
-	exec.Start()
-	defer exec.Stop()
-
-	mux := chi.NewMux()
-
-	mux.Mount("/xxl-job", exec.Handle("/xxl-job"))
-
-	http.ListenAndServe(":10010", mux)
+	listener, err := net.Listen("tcp", "127.0.0.1:10010")
+	if err != nil {
+		return err
+	}
+	server := &http.Server{Handler: executor.Handle("/xxl-job"), ReadHeaderTimeout: 5 * time.Second}
+	defer listener.Close()
+	go server.Serve(listener)
+	defer func() {
+		shutdown, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdown)
+		_ = executor.Shutdown(shutdown)
+	}()
+	if err := executor.Start(); err != nil {
+		return err
+	}
+	<-ctx.Done()
+	return nil
 }

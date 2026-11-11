@@ -6,25 +6,26 @@ package xxl
 
 type LogHandler func(req LogParam) Return[LogResult]
 
-// 默认返回
+// defaultLogHandler 没有日志存储时返回真实空页，不伪造内容。
 func defaultLogHandler(req LogParam) Return[LogResult] {
 	return Return[LogResult]{
 		Code: SuccessCode,
 		Msg:  "",
-		Content: LogResult{
+		Data: LogResult{
 			FromLineNum: req.FromLineNum,
-			ToLineNum:   2,
-			LogContent:  "这是日志默认返回，说明没有设置LogHandler",
+			ToLineNum:   req.FromLineNum - 1,
+			LogContent:  "",
 			IsEnd:       true,
 		},
 	}
 }
 
+// reqErrLogHandler 把日志查询错误转换为协议响应。
 func reqErrLogHandler(err error) Return[LogResult] {
 	return Return[LogResult]{
 		Code: FailureCode,
 		Msg:  err.Error(),
-		Content: LogResult{
+		Data: LogResult{
 			FromLineNum: 0,
 			ToLineNum:   0,
 			LogContent:  err.Error(),

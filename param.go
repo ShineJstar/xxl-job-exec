@@ -4,11 +4,13 @@ package xxl
 const (
 	SuccessCode = 200
 	FailureCode = 500
+	TimeoutCode = 502 // 与 Java HANDLE_CODE_TIMEOUT 保持一致。
 )
 
 // Middleware 中间件构造函数
 type Middleware func(TaskFunc) TaskFunc
 
+// chain 按注册顺序组合任务中间件。
 func (e *Executor) chain(next TaskFunc) TaskFunc {
 	for i := range e.middlewares {
 		next = e.middlewares[len(e.middlewares)-1-i](next)
@@ -18,9 +20,9 @@ func (e *Executor) chain(next TaskFunc) TaskFunc {
 
 // 通用响应
 type Return[T any] struct {
-	Code    int    `json:"code"`              // 200 表示正常、其他失败
-	Msg     string `json:"msg,omitempty"`     // 错误提示消息
-	Content T      `json:"content,omitempty"` // 响应内容
+	Code int    `json:"code"`           // 200 表示正常、其他失败
+	Msg  string `json:"msg,omitempty"`  // 错误提示消息
+	Data T      `json:"data,omitempty"` // 响应内容
 }
 
 /*****************  上行参数  *********************/
@@ -53,6 +55,8 @@ const (
 
 // TriggerParam 触发任务请求参数
 type TriggerParam struct {
+	TraceParent           string `json:"traceparent,omitempty"` // W3C 远端链路上下文。
+	TraceState            string `json:"tracestate,omitempty"`  // W3C 厂商状态。
 	JobID                 int64  `json:"jobId"`                 // 任务ID
 	ExecutorHandler       string `json:"executorHandler"`       // 任务标识
 	ExecutorParams        string `json:"executorParams"`        // 任务参数
@@ -92,6 +96,7 @@ type LogResult struct {
 	IsEnd       bool   `json:"isEnd"`       // 日志是否全部加载完
 }
 
+// newCallback 保持 Java 回调的字段名和本次执行的日志标识。
 func newCallback(t TriggerParam, code int, msg string) HandleCallbackParam {
 	return HandleCallbackParam{
 		LogID:      t.LogID,
@@ -104,6 +109,7 @@ func newCallback(t TriggerParam, code int, msg string) HandleCallbackParam {
 var ReturnSuccess = Success("")
 var ReturnFailure = Failure("")
 
+// Success 创建执行器协议成功响应。
 func Success(msg string) Return[string] {
 	return Return[string]{
 		Code: SuccessCode,
@@ -111,6 +117,7 @@ func Success(msg string) Return[string] {
 	}
 }
 
+// Failure 创建执行器协议失败响应。
 func Failure(msg string) Return[string] {
 	return Return[string]{
 		Code: FailureCode,
